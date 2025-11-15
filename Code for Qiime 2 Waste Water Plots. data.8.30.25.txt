@@ -1,0 +1,291 @@
+# Importing the data from Sample 0. 
+
+qiime tools import \
+  --type 'SampleData[PairedEndSequencesWithQuality]' \
+  --input-path data.8.30.25 \
+  --input-format CasavaOneEightSingleLanePerSampleDirFmt \
+  --output-path demux-paired-end.qza
+
+
+
+#Visualizing the demux data above
+
+qiime demux summarize \
+  --i-data demux-paired-end.qza \
+  --o-visualization demux.qzv
+
+
+## In order for this to work, I had to make sure all the samples were in the same "data" folder.
+
+
+# Denoising and clustering using deblur, 	so far this does not work
+## 
+
+qiime dada2 denoise-paired \
+--i-demultiplexed-seqs demux-paired-end.qza \
+  --p-trim-left-f 0 \
+  --p-trim-left-r 0 \
+  --p-trunc-len-f 290 \
+  --p-trunc-len-r 230 \
+  --o-representative-sequences rep-seqs.8.30.25.qza \
+  --o-table table.8.30.25.qza \
+  --o-denoising-stats stats.8.30.25.qza
+
+
+# above produces the artifact file so now I need to run a 
+## code for visualizing; this takes about 1 hour: 
+
+qiime metadata tabulate \
+  --m-input-file stats.8.30.25.qza \
+  --o-visualization stats.8.30.25.qzv
+
+# above is going to present a table with denoised information. 
+
+## The next job would be to complete the feature table
+### to see the data, I am not sure what this should
+#### look like, what should the input be? 
+
+##### It should tell me how many sequences link with
+###### each sample. This takes 2 hours and 15 minutes
+
+
+
+# After denoising the data, below is a feature table, that 
+## gives every bacteria a feature ID and it shows their sequence 
+### which you can easily click on using the interactive table 
+#### and go to NCBI blast for additional information
+##### on each bacteria. 
+
+qiime feature-table summarize \
+  --i-table table.8.30.25.qza \
+  --m-sample-metadata-file sample-metadata.08.30.25.tsv \
+  --o-visualization table.08.30.25.qzv
+qiime feature-table tabulate-seqs \
+  --i-data rep-seqs.8.30.25.qza \
+  --o-visualization rep-seqs.08.30.25.qzv
+
+########################################
+# We were also able to generate a tree for phylogenetic 
+## diversity for this we used the output from demultiplex
+
+qiime phylogeny align-to-tree-mafft-fasttree \
+--i-sequences rep-seqs.8.30.25.qza \
+--output-dir phylogeny-align-to-tree-mafft-fasttree.8.30.25
+
+
+
+
+	
+
+# The next step was to find the alpha and beta diversity
+....???
+
+qiime diversity core-metrics-phylogenetic \
+  --i-phylogeny phylogeny-align-to-tree-mafft-fasttree/rooted_tree.qza \
+  --i-table table.8.30.25.qza \
+  --p-sampling-depth 248 \
+  --m-metadata-file sample-metadata.08.30.25.tsv \
+  --output-dir diversity-core-metrics-phylogenetic
+
+
+# was not able to do Alpha, Beta diversity or emperor plot
+##Or pcoa yet.  I would also like to do PCA, with this same data. 
+###These are all important to understand the difference between 
+####And within samples. 
+#############################################
+
+# It's important to do Alpha rarefaction plotting. This is 
+## important to calculate alpha diversity at different 
+### sampling depths  
+
+qiime diversity alpha-rarefaction \
+  --i-table table.8.30.25.qza \
+  --i-phylogeny phylogeny-align-to-tree-mafft-fasttree/rooted_tree.qza \
+  --p-max-depth 4000 \
+  --m-metadata-file sample-metadata.08.30.25.tsv \
+  --o-visualization alpha-rarefaction.08.30.25.qzv
+
+# Now for taxonomic analysis. For this, qiime2 uses what
+## is called a Naive Bayes classifier which finds the 
+### operational taxonomic unit (OTU). So from the V4 region, we are 
+#### going to include only 250 bp from the trimmed region
+
+wget \
+  -O 'gg-13-8-99-515-806-nb-classifier.qza' \
+  'https://docs.qiime2.org/2021.11/data/tutorials/moving-pictures-usage/gg-13-8-99-515-806-nb-classifier.qza'
+
+qiime feature-classifier classify-sklearn \
+  --i-classifier gg-13-8-99-515-806-nb-classifier.qza \
+  --i-reads rep-seqs.qza \
+  --o-classification taxonomy.qza
+qiime metadata tabulate \
+  --m-input-file taxonomy.qza \
+  --o-visualization taxonomy.qzv
+
+# With this visual, we can go into the blast hits we got 
+## from rep-see.qzv and tell whether there is any similarity, 
+### and the taxonomic level they began. 
+
+# Qiime2 allows us to also use interactive bar plots to 
+## check out the taxonomic compositions. 
+
+qiime taxa barplot \
+  --i-table table.qza \
+  --i-taxonomy taxonomy.qza \
+  --m-metadata-file sample-metadata.tsv \
+  --o-visualization taxa-bar-plots.qzv
+  
+
+#################################
+#Finally in the qiime2 package, we can consider doing the 
+##differential abundance testing with ANCOM (analysis of 
+### composition of microbes)It compares the composition
+#### microbes in all our populations here. 
+##### This method gives improved inference in microbiome data, even better 
+###### than t.tests which can give inflated comparison significance. 
+
+qiime feature-table filter-samples \
+  --i-table table.qza \
+  --m-metadata-file sample-metadata.tsv \
+  --p-where '[reverse-index]='"'"'TTCTAGCT'"'"'' \
+  --o-filtered-table AllSamples-table.qza
+
+qiime composition add-pseudocount \
+  --i-table AllSamples-table.qza \
+  --o-composition-table comp-AllSamples-table.qza
+
+
+
+# Now using the artifacts created above, we can use ANCOM 
+## to determine what features are different in abundance
+### across sample0 (or any other sample we put in place)
+
+qiime composition ancom \
+  --i-table comp-AllSamples-table.qza \
+  --m-metadata-file sample-metadata.tsv \
+  --m-metadata-column forward-index \ 
+  --o-visualization ancom-AllSamples.qzv
+
+#above cannot be used because there was only one set of 
+## data for each sample (one subject or trial/site), but
+### there are so many features changing between groups,
+####this technique is error prone.  
+#################################################
+
+
+
+# Now running Empress in order to employ a OTU phylogenetic tree 
+
+qiime empress tree-plot \
+    --i-tree phylogeny-align-to-tree-mafft-fasttree/rooted_tree.qza \
+    --m-feature-metadata-file taxonomy.qza \
+    --o-visualization tree-viz.qzv
+
+
+# now we can get a community plot, if we have more sample replicates 
+## the code below is used (it needs to be altered to fit the replicates code for Pcoa)
+##################
+
+qiime empress community-plot \
+    --i-tree tree.qza \
+    --i-feature-table feature-table.qza \
+    --m-sample-metadata-file sample-metadata.tsv \
+    --m-feature-metadata-file taxonomy.qza \
+    --i-pcoa ordination.qza \
+    --p-filter-extra-samples \
+    --o-visualization community-tree-viz.qzv
+
+##################
+
+qiime empress community-plot \
+    --i-tree rooted-tree.qza \
+    --i-feature-table table.qza \
+    --m-sample-metadata-file sample-metadata.tsv \
+    --m-feature-metadata-file taxonomy.qza \
+    --o-visualization empress-tree.qzv
+
+
+
+
+
+
+
+
+
+
+
+qiime phylogeny align-to-tree-mafft-fasttree \
+--i-sequences rep-seqs.8.30.25.qza \
+--o-alignment aligned-rep-seqs.8.30.25.qza \
+--o-masked-alignment masked-aligned-rep-seqs.8.30.25.qza \
+--o-tree unrooted-tree.8.30.25.qza \
+--o-rooted-tree rooted-tree.qza
+
+
+
+
+
+
+
+qiime diversity alpha-rarefaction \
+  --i-table table.8.30.25.qza \
+  --i-phylogeny rooted-tree.qza \
+  --p-max-depth 4000 \
+  --m-metadata-file sample-metadata.08.30.25.tsv \
+  --o-visualization alpha-rarefaction.8.30.25.qzv
+
+
+qiime diversity core-metrics-phylogenetic \
+  --i-phylogeny rooted-tree.qza \
+  --i-table table.8.30.25.qza \
+  --p-sampling-depth 1103 \
+  --m-metadata-file sample-metadata.08.30.25.tsv \
+  --output-dir core-metrics-results
+
+
+
+
+
+qiime diversity core-metrics-phylogenetic \
+  --i-phylogeny rooted-tree.qza \
+  --i-table table.8.30.25.qza \
+  --p-sampling-depth 13307 \
+  --m-metadata-file sample-metadata.08.30.25.tsv \
+  --output-dir core-metrics-results.8.30.25
+
+
+
+
+
+
+
+
+
+
+
+
+wget \
+-O 'gg-13-8-99-515-806-nb-classifier.qza' \
+'https://docs.qiime2.org/2021.11/data/tutorials/moving-pictures-usage/gg-13-8-99-515-806-nb-classifier.qza'
+qiime feature-classifier classify-sklearn \
+--i-classifier gg-13-8-99-515-806-nb-classifier.qza \
+--i-reads rep-seqs.8.30.25.qza \
+--o-classification taxonomy.8.30.25.qza
+
+
+qiime metadata tabulate \
+--m-input-file taxonomy.8.30.25.qza \
+--o-visualization taxonomy.8.30.25.qzv
+
+
+qiime taxa barplot \
+--i-table table.8.30.25.qza \
+--i-taxonomy taxonomy.8.30.25.qza \
+--m-metadata-file sample-metadata.08.30.25.tsv \
+--o-visualization taxa-bar-plots.8.30.25.qzv
+
+
+qiime empress tree-plot \
+--i-tree phylogeny-align-to-tree-mafft-fasttree/rooted_tree.qza \
+--m-feature-metadata-file taxonomy.8.30.25.qza \
+--o-visualization tree-viz.8.30.25.qzv
